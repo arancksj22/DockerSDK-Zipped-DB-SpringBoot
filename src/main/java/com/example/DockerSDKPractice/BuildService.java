@@ -8,11 +8,8 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
-// Removed unused imports like File, IOException, LocalDateTime, BuildJob, BuildJobRepository
-// Removed Transferable as it's less common now, MountableFile is preferred
-
 @Service
-public class BuildService { // Renamed from DockerInteractionService
+public class BuildService {
 
     private static final Logger log = LoggerFactory.getLogger(BuildService.class);
 
@@ -44,48 +41,43 @@ public class BuildService { // Renamed from DockerInteractionService
             // Use switch statement for clarity
             switch (projectType.toUpperCase()) {
                 case "MAVEN":
-                    // *** CHANGE IMAGE HERE ***
-                    // Use the standard image, not -slim, as it includes unzip
+                    // Use standard image as it includes unzip
                     buildImageName = "maven:3.8-openjdk-17";
-                    // *** END CHANGE ***
-
                     // Sequence of commands executed via shell
                     buildCommands = new String[]{ "/bin/sh", "-c",
-                            "mkdir -p /app/src && " + // Ensure src dir exists
-                                    "cd /app && " +
-                                    "unzip -o code.zip -d src && " + // Unzip into src directory
-                                    "echo 'Unzipped code.' && " + // Log progress
-                                    "rm code.zip && " +
-                                    "cd src && " +
-                                    // Find the directory containing pom.xml (might be current or one level down)
-                                    "BUILD_DIR=$(find . -maxdepth 2 -name pom.xml -printf '%h' | head -n 1) && " +
-                                    "cd \"$BUILD_DIR\" && " +
-                                    "echo 'Building in directory: ' $(pwd) && " + // Log current dir
-                                    "ls -la && " + // List files for debugging
+                            "mkdir -p /app/src && cd /app && unzip -o code.zip -d src && echo 'Unzipped code.' && rm code.zip && cd src && " +
+                                    // Use find + dirname, safer for different unzip structures and works in more shells
+                                    "BUILD_DIR=$(find . -maxdepth 2 -name pom.xml -exec dirname {} \\; | head -n 1) && cd \"$BUILD_DIR\" && " +
+                                    "echo 'Building in directory: ' $(pwd) && ls -la && " +
                                     "mvn clean install -DskipTests" // Build, skip tests
                     };
                     break;
 
                 case "NPM":
-                    // Alpine images often lack unzip too. We might need to install it.
+                    // Alpine images often lack unzip too. We need to install it.
                     buildImageName = "node:20-alpine";
+                    // Corrected find command for BusyBox/Alpine using dirname
                     buildCommands = new String[]{ "/bin/sh", "-c",
                             "apk add --no-cache unzip && " + // Install unzip in Alpine
-                                    "mkdir -p /app/src && cd /app && unzip -o code.zip -d src && rm code.zip && cd src && " +
+                                    "mkdir -p /app/src && cd /app && unzip -o code.zip -d src && echo 'Unzipped code.' && rm code.zip && cd src && " +
+                                    // Use find + dirname instead of -printf %h
+                                    "BUILD_DIR=$(find . -maxdepth 2 -name package.json -exec dirname {} \\; | head -n 1) && cd \"$BUILD_DIR\" && " +
                                     "echo 'Building in directory: ' $(pwd) && ls -la && " +
-                                    "npm install && npm run build"
+                                    "npm install && npm run build" // Assumes 'build' script exists
                     };
                     break;
 
                 case "PIP": // Example for Python/pip
-                    // Slim Debian images might also lack unzip.
+                    // Slim Debian images might also lack unzip. Install it.
                     buildImageName = "python:3.11-slim";
+                    // Add unzip install for Debian slim and use find + dirname
                     buildCommands = new String[]{ "/bin/sh", "-c",
-                            "apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && " + // Install unzip in Debian/Ubuntu slim
-                                    "mkdir -p /app/src && cd /app && unzip -o code.zip -d src && rm code.zip && cd src && " +
-                                    "BUILD_DIR=$(find . -maxdepth 2 -name requirements.txt -printf '%h' | head -n 1) && cd \"$BUILD_DIR\" && " +
+                            "apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && " + // Install unzip
+                                    "mkdir -p /app/src && cd /app && unzip -o code.zip -d src && echo 'Unzipped code.' && rm code.zip && cd src && " +
+                                    // Use find + dirname
+                                    "BUILD_DIR=$(find . -maxdepth 2 -name requirements.txt -exec dirname {} \\; | head -n 1) && cd \"$BUILD_DIR\" && " +
                                     "echo 'Building in directory: ' $(pwd) && ls -la && " +
-                                    "pip install --no-cache-dir -r requirements.txt"
+                                    "pip install --no-cache-dir -r requirements.txt" // Install dependencies
                             // Add test/build command if needed: "&& python -m pytest"
                     };
                     break;
